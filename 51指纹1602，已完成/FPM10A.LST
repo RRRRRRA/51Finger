@@ -1,0 +1,394 @@
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 1   
+
+
+C51 COMPILER V9.57.0.0, COMPILATION OF MODULE FPM10A
+OBJECT MODULE PLACED IN FPM10A.OBJ
+COMPILER INVOKED BY: D:\APPS\KEIL\C51\BIN\C51.EXE FPM10A.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          #include <REGX52.H>
+   2          #include "Key.h"
+   3          #include "UART.h"
+   4          #include "delay.h"
+   5          #include "lcd_1602.h"
+   6          #include "buzz.h"
+   7          #include "FPM10A.h"
+   8          
+   9          volatile unsigned char FPM10A_RECEICE_BUFFER[32];
+  10          unsigned int finger_id = 0;
+  11          
+  12          //FINGERPRINT通信协议定义
+  13          //FINGERPRINT通信协议定义
+  14          //口令验证【19】
+  15          code unsigned char FPM10A_Get_Device[10] ={0x01,0x00,0x07,0x13,0x00,0x00,0x00,0x00,0x00,0x1b};
+  16          //协议包头
+  17          code unsigned char FPM10A_Pack_Head[6] = {0xEF,0x01,0xFF,0xFF,0xFF,0xFF};  
+  18          //。。。。第四位指令码。。。。
+  19          //。。。。。。。。。。。。。。
+  20          //获得指纹图像，录入图像 PS_GetImage【1】
+  21          code unsigned char FPM10A_Get_Img[6] = {0x01,0x00,0x03,0x01,0x00,0x05}; 
+  22          
+  23          //将图像放入到BUFFER1，生成特征 PS_GenChar【2】
+  24          code unsigned char FPM10A_Img_To_Buffer1[7]={0x01,0x00,0x04,0x02,0x01,0x00,0x08}; 
+  25          //将图像放入到BUFFER2，生成特征 PS_GenChar【2】
+  26          code unsigned char FPM10A_Img_To_Buffer2[7]={0x01,0x00,0x04,0x02,0x02,0x00,0x09}; 
+  27          
+  28          //搜索指纹搜索范围0 - 999,使用BUFFER1中的特征码搜索，搜索指纹 PS_Search【4】
+  29          code unsigned char FPM10A_Search[11]={0x01,0x00,0x08,0x04,0x01,0x00,0x00,0x03,0xE7,0x00,0xF8}; 
+  30          //搜索0-9号指纹，BUFFER2【4】
+  31          code unsigned char FPM10A_Search_0_9[11]={0x01,0x00,0x08,0x04,0x01,0x00,0x00,0x00,0x13,0x00,0x21}; 
+  32          
+  33          //将BUFFER1跟BUFFER2合成特征模版，合并特征（生成模板） PS_RegModel【5】
+  34          code unsigned char FPM10A_Reg_Model[6]={0x01,0x00,0x03,0x05,0x00,0x09}; 
+  35          
+  36          //将BUFFER1中的特征码存放到指定的位置【6】
+  37          volatile unsigned char  FPM10A_Save_Finger[9]={0x01,0x00,0x06,0x06,0x01,0x00,0x0B,0x00,0x19};
+  38          
+  39          //删除指纹模块里所有的模版，清空指纹库 PS_Empty 【13】
+  40          code unsigned char FPM10A_Delete_All_Model[6]={0x01,0x00,0x03,0x0d,0x00,0x11};
+  41          
+  42          //获得模版总数，读有效模板个数 PS_ValidTempleteNum【29】
+  43          code unsigned char FPM10A_Get_Templete_Count[6] ={0x01,0x00,0x03,0x1D,0x00,0x21 }; 
+  44          //volatile:系统总是重新从它所在的内存读取数据，即使它前面的指令刚刚从该处读取过数据
+  45          /*------------------ FINGERPRINT命令字 --------------------------*/
+  46           //发送包头
+  47          void FPM10A_Cmd_Send_Pack_Head(void)
+  48          {
+  49   1        int i;  
+  50   1        for(i=0;i<6;i++) //包头
+  51   1         {
+  52   2           Uart_Sent_Byte(FPM10A_Pack_Head[i]);   
+  53   2          }   
+  54   1      }
+  55          //发送指令
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 2   
+
+  56          void FPM10A_Cmd_Check(void)
+  57          {
+  58   1        int i=0;
+  59   1        FPM10A_Cmd_Send_Pack_Head(); //发送通信协议包头
+  60   1        for(i=0;i<10;i++)
+  61   1         {    
+  62   2          Uart_Sent_Byte(FPM10A_Get_Device[i]);
+  63   2          }
+  64   1      }
+  65          //接收反馈数据缓冲
+  66          void FPM10A_Receive_Data(unsigned char ucLength)
+  67          {
+  68   1        unsigned char i;
+  69   1      
+  70   1        for (i=0;i<ucLength;i++)
+  71   1           FPM10A_RECEICE_BUFFER[i] = Uart_Receive_Byte();
+  72   1      
+  73   1      }
+  74          
+  75          //FINGERPRINT_获得指纹图像命令
+  76          void FPM10A_Cmd_Get_Img(void)
+  77          {
+  78   1          unsigned char i;
+  79   1          FPM10A_Cmd_Send_Pack_Head(); //发送通信协议包头
+  80   1          for(i=0;i<6;i++) //发送命令 0x1d
+  81   1        {
+  82   2             Uart_Sent_Byte(FPM10A_Get_Img[i]);
+  83   2        }
+  84   1      }
+  85          //讲图像转换成特征码存放在Buffer1中
+  86          void FINGERPRINT_Cmd_Img_To_Buffer1(void)
+  87          {
+  88   1        unsigned char i;
+  89   1        FPM10A_Cmd_Send_Pack_Head(); //发送通信协议包头      
+  90   1          for(i=0;i<7;i++)   //发送命令 将图像转换成 特征码 存放在 CHAR_buffer1
+  91   1           {
+  92   2            Uart_Sent_Byte(FPM10A_Img_To_Buffer1[i]);
+  93   2            }
+  94   1      }
+  95          //将图像转换成特征码存放在Buffer2中
+  96          void FINGERPRINT_Cmd_Img_To_Buffer2(void)
+  97          {
+  98   1           unsigned char i;
+  99   1           for(i=0;i<6;i++)    //发送包头
+ 100   1         {
+ 101   2            Uart_Sent_Byte(FPM10A_Pack_Head[i]);   
+ 102   2           }
+ 103   1           for(i=0;i<7;i++)   //发送命令 将图像转换成 特征码 存放在 CHAR_buffer1
+ 104   1            {
+ 105   2              Uart_Sent_Byte(FPM10A_Img_To_Buffer2[i]);
+ 106   2            }
+ 107   1      }
+ 108          //搜索全部用户999枚
+ 109          void FPM10A_Cmd_Search_Finger(void)
+ 110          {
+ 111   1             unsigned char i;         
+ 112   1             FPM10A_Cmd_Send_Pack_Head(); //发送通信协议包头
+ 113   1             for(i=0;i<11;i++)
+ 114   1                 {
+ 115   2                  Uart_Sent_Byte(FPM10A_Search[i]);   
+ 116   2               }
+ 117   1      }
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 3   
+
+ 118          
+ 119          void FPM10A_Cmd_Reg_Model(void)
+ 120          {
+ 121   1             unsigned char i;    
+ 122   1            
+ 123   1             FPM10A_Cmd_Send_Pack_Head(); //发送通信协议包头
+ 124   1      
+ 125   1             for(i=0;i<6;i++)
+ 126   1                 {
+ 127   2                  Uart_Sent_Byte(FPM10A_Reg_Model[i]);   
+ 128   2               }
+ 129   1      
+ 130   1      
+ 131   1      }
+ 132          //删除指纹模块里的所有指纹模版
+ 133          void FINGERPRINT_Cmd_Delete_All_Model(void)
+ 134          {
+ 135   1           unsigned char i;    
+ 136   1          for(i=0;i<6;i++) //包头
+ 137   1            Uart_Sent_Byte(FPM10A_Pack_Head[i]);   
+ 138   1          for(i=0;i<6;i++) //命令合并指纹模版
+ 139   1           {
+ 140   2           Uart_Sent_Byte(FPM10A_Delete_All_Model[i]);   
+ 141   2           }  
+ 142   1      }
+ 143          //保存指纹
+ 144          void FPM10A_Cmd_Save_Finger( unsigned int storeID )
+ 145          {
+ 146   1             unsigned long temp = 0;
+ 147   1             unsigned char i;
+ 148   1             FPM10A_Save_Finger[5] =(storeID&0xFF00)>>8;
+ 149   1             FPM10A_Save_Finger[6] = (storeID&0x00FF);
+ 150   1             for(i=0;i<7;i++)   //计算校验和
+ 151   1                 temp = temp + FPM10A_Save_Finger[i]; 
+ 152   1             FPM10A_Save_Finger[7]=(temp & 0x00FF00) >> 8; //存放校验数据
+ 153   1             FPM10A_Save_Finger[8]= temp & 0x0000FF;       
+ 154   1             FPM10A_Cmd_Send_Pack_Head(); //发送通信协议包头  
+ 155   1             for(i=0;i<9;i++)  
+ 156   1                Uart_Sent_Byte(FPM10A_Save_Finger[i]);      //发送命令 将图像转换成 特征码 存放在 CHAR_buffer1
+ 157   1      }
+ 158          //添加指纹
+ 159          void FPM10A_Add_Fingerprint()
+ 160          {
+ 161   1        unsigned char id_show[]={0,0,0};
+ 162   1        LCD1602_WriteCommand(0x01); //清屏
+ 163   1        finger_id=0;  
+ 164   1        while(1)
+ 165   1        {
+ 166   2            LCD1602_ShowString(1,1,"   Add Finger   ");
+ 167   2            LCD1602_ShowString(2,1,"   ID is        ");
+ 168   2        //按返回键直接回到主菜单
+ 169   2        if(KEY_CANCEL == 0) 
+ 170   2        {
+ 171   3           while(KEY_CANCEL==0);
+ 172   3           break;
+ 173   3        }
+ 174   2      
+ 175   2        //按切换键指纹iD值加1
+ 176   2        if(KEY_DOWN == 0)
+ 177   2        {
+ 178   3          while(KEY_DOWN==0);
+ 179   3          if(finger_id == 1000)
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 4   
+
+ 180   3          {
+ 181   4            finger_id = 0;
+ 182   4          }
+ 183   3          else
+ 184   3          finger_id = finger_id + 1;
+ 185   3        }
+ 186   2      
+ 187   2         //指纹iD值显示处理 
+ 188   2          LCD1602_ShowNum(2,10,finger_id,3);
+ 189   2      
+ 190   2         //按确认键开始录入指纹信息           
+ 191   2         if(KEY_OK == 0)
+ 192   2          { 
+ 193   3              while(KEY_OK==0);
+ 194   3                LCD1602_WriteCommand(0x01); //清屏
+ 195   3                LCD1602_ShowString (1,1,"Put Finger First");
+ 196   3                LCD1602_ShowString (2,1,"                ");
+ 197   3            while(KEY_CANCEL == 1)
+ 198   3             {
+ 199   4              //按下返回键退出录入返回fingerID调整状态   
+ 200   4              if(KEY_CANCEL == 0) 
+ 201   4               {
+ 202   5                while(KEY_CANCEL==0);
+ 203   5                break;
+ 204   5                }
+ 205   4              FPM10A_Cmd_Get_Img(); //获得指纹图像
+ 206   4              FPM10A_Receive_Data(12);
+ 207   4              //判断接收到的确认码,等于0指纹获取成功
+ 208   4              if(FPM10A_RECEICE_BUFFER[9]==0)
+ 209   4               {
+ 210   5                Delay_Ms(100);
+ 211   5                FINGERPRINT_Cmd_Img_To_Buffer1();
+ 212   5                  FPM10A_Receive_Data(12);
+ 213   5                 LCD1602_WriteCommand(0x01); //清屏
+ 214   5                 LCD1602_ShowString (1,1,"Successful First");
+ 215   5                Buzz_Times(1);//单片机滴嗒一声
+ 216   5                Delay_Ms(1000);
+ 217   5                LCD1602_WriteCommand(0x01); //清屏
+ 218   5                 LCD1602_ShowString (1,1,"Put Finger Again");
+ 219   5                 LCD1602_ShowString (2,1,"                ");
+ 220   5                while(1)
+ 221   5                {
+ 222   6                  if(KEY_CANCEL == 0) 
+ 223   6                  {
+ 224   7                    while(KEY_CANCEL==0);
+ 225   7                    break;
+ 226   7                  }
+ 227   6                 FPM10A_Cmd_Get_Img(); //获得指纹图像
+ 228   6                 FPM10A_Receive_Data(12);
+ 229   6                //判断接收到的确认码,等于0指纹获取成功
+ 230   6                if(FPM10A_RECEICE_BUFFER[9]==0)
+ 231   6                {
+ 232   7                  Delay_Ms(200);
+ 233   7                  LCD1602_WriteCommand(0x01); //清屏
+ 234   7                  LCD1602_ShowString (1,1,"Successful Sec  ");
+ 235   7                  LCD1602_ShowString (2,1,"ID is           ");
+ 236   7                   //指纹iD值显示处理 
+ 237   7                   LCD1602_ShowNum(2,7,finger_id,3);
+ 238   7                  FINGERPRINT_Cmd_Img_To_Buffer2();
+ 239   7                    FPM10A_Receive_Data(12);
+ 240   7                  FPM10A_Cmd_Reg_Model();//转换成特征码
+ 241   7                      FPM10A_Receive_Data(12); 
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 5   
+
+ 242   7                    FPM10A_Cmd_Save_Finger(finger_id);                             
+ 243   7                        FPM10A_Receive_Data(12);
+ 244   7                  Buzz_Times(1);//单片机滴嗒一声
+ 245   7                  Delay_Ms(2000);
+ 246   7                    LCD1602_WriteCommand(0x01); //清屏
+ 247   7                  finger_id=finger_id+1;
+ 248   7                    break;
+ 249   7                  }
+ 250   6                 }
+ 251   5                    break;
+ 252   5                }
+ 253   4              }
+ 254   3            }
+ 255   2          }
+ 256   1      }
+ 257          
+ 258          //搜索指纹
+ 259          void FPM10A_Find_Fingerprint()
+ 260          {
+ 261   1        unsigned int find_fingerid = 0;
+ 262   1        unsigned char id_show[]={0,0,0};
+ 263   1        do
+ 264   1        {
+ 265   2          LCD1602_WriteCommand(0x01); //清屏
+ 266   2          LCD1602_ShowString(1,1,"Find Finger     ");
+ 267   2          LCD1602_ShowString(2,1,"                ");
+ 268   2          FPM10A_Cmd_Get_Img(); //获得指纹图像
+ 269   2          FPM10A_Receive_Data(12);    
+ 270   2          //判断接收到的确认码,等于0指纹获取成功
+ 271   2          if(FPM10A_RECEICE_BUFFER[9]==0)
+ 272   2          {     
+ 273   3            Delay_Ms(100);
+ 274   3            FINGERPRINT_Cmd_Img_To_Buffer1();
+ 275   3            FPM10A_Receive_Data(12);    
+ 276   3            FPM10A_Cmd_Search_Finger();
+ 277   3            FPM10A_Receive_Data(16);      
+ 278   3            if(FPM10A_RECEICE_BUFFER[9] == 0) //搜索到  
+ 279   3            {
+ 280   4              LCD1602_WriteCommand(0x01); //清屏
+ 281   4              LCD1602_ShowString(1,1," Search success ");
+ 282   4              LCD1602_ShowString(2,1,"   ID is        ");
+ 283   4              //LCD1602_Display(0xc0,"Open Door",0,16);
+ 284   4              Buzz_Times(1);          
+ 285   4              //拼接指纹ID数
+ 286   4              find_fingerid = FPM10A_RECEICE_BUFFER[10]*256 + FPM10A_RECEICE_BUFFER[11];          
+ 287   4               //指纹iD值显示处理 
+ 288   4              LCD1602_ShowNum(2,11,find_fingerid,3);
+ 289   4      //          LCD1602_WriteCommand(0xc0+10);
+ 290   4      //         LCD1602_WriteData(find_fingerid/100+48);
+ 291   4      //         LCD1602_WriteData(find_fingerid%100/10+48);
+ 292   4      //         LCD1602_WriteData(find_fingerid%100%10+48);            
+ 293   4              Delay_Ms(2000);       
+ 294   4               }
+ 295   3              else //没有找到
+ 296   3              {
+ 297   4                LCD1602_WriteCommand(0x01); //清屏
+ 298   4                LCD1602_ShowString(1,1," Search  failed ");
+ 299   4                LCD1602_ShowString(2,1,"                ");
+ 300   4                Buzz_Times(3);
+ 301   4              }
+ 302   3            }   
+ 303   2          }while(KEY_CANCEL == 1);
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 6   
+
+ 304   1      }
+ 305          //删除所有存贮的指纹库
+ 306          void FPM10A_Delete_All_Fingerprint()
+ 307          {
+ 308   1          unsigned char i=0;
+ 309   1            LCD1602_WriteCommand(0x01); //清屏
+ 310   1              LCD1602_ShowString(1,1,"   Empty all    ");
+ 311   1              LCD1602_ShowString(2,1,"   Yes or no ?  "); 
+ 312   1          do
+ 313   1           {
+ 314   2            if(KEY_OK==0)
+ 315   2            {
+ 316   3              while(KEY_OK==0);
+ 317   3              LCD1602_ShowString(1,1,"   emptying     ");
+ 318   3              LCD1602_ShowString(2,1,"                "); 
+ 319   3              Delay_Ms(300);
+ 320   3              LCD1602_WriteCommand(0xc0);
+ 321   3              for(i=0;i<16;i++)
+ 322   3               {
+ 323   4                LCD1602_WriteData(42);
+ 324   4                Delay_Ms(100);
+ 325   4               }
+ 326   3              FINGERPRINT_Cmd_Delete_All_Model();
+ 327   3              FPM10A_Receive_Data(12); 
+ 328   3               LCD1602_WriteCommand(0x01); //清屏
+ 329   3              LCD1602_ShowString(1,1,"   All empty    ");
+ 330   3              LCD1602_ShowString(2,1,"                ");
+ 331   3              Buzz_Times(3);
+ 332   3              break;
+ 333   3            }
+ 334   2           }while(KEY_CANCEL==1);
+ 335   1      }
+ 336          
+ 337          void Device_Check(void)
+ 338          {
+ 339   1          unsigned char i=0;
+ 340   1          FPM10A_RECEICE_BUFFER[9]=1;                  //串口数组第九位可判断是否通信正常
+ 341   1          LCD1602_ShowString(2,1,"Loading");               //设备加载中界面                
+ 342   1          for(i=0;i<8;i++)                       //进度条式更新，看起来美观
+ 343   1          {
+ 344   2            LCD1602_WriteData(42);                         //42对应ASIC码的 *
+ 345   2            Delay_Ms(200);                       //控制进度条速度
+ 346   2          }                 
+ 347   1          LCD1602_ShowString(2,1,"Docking  failure");      //液晶先显示对接失败，如果指纹模块插对的话会将其覆盖 
+ 348   1          FPM10A_Cmd_Check();                 //单片机向指纹模块发送校对命令
+ 349   1          FPM10A_Receive_Data(12);              //将串口接收到的数据转存
+ 350   1          if(FPM10A_RECEICE_BUFFER[9] == 0)         //判断数据低第9位是否接收到0
+ 351   1          {
+ 352   2            LCD1602_ShowString(2,1,"Docking  success"); //符合成功条件则显示对接成功
+ 353   2          }
+ 354   1      }
+ 355          
+ 356          
+ 357          
+ 358          
+ 359          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1232    ----
+   CONSTANT SIZE    =    379    ----
+   XDATA SIZE       =   ----    ----
+C51 COMPILER V9.57.0.0   FPM10A                                                            01/14/2022 23:14:54 PAGE 7   
+
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     43      27
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

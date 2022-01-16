@@ -1,0 +1,9 @@
+"main.obj",
+"buzz.obj",
+"delay.obj",
+"key.obj",
+"uart.obj",
+"FPM10A.obj",
+"lcd_1602.obj" 
+TO "template" 
+RAMSIZE(256) 
